@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { StyleSheet, Text, View, TouchableOpacity, FlatList } from 'react-native';
 import { Accelerometer } from 'expo-sensors';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -24,12 +24,21 @@ export default function PedometerApp() {
   const [isMeasuring, setIsMeasuring] = useState(false);
   const [steps, setSteps] = useState(0);
   const [distance, setDistance] = useState(0);
-  const [lastAcceleration, setLastAcceleration] = useState<Acceleration | null>(null);
   const [startTime, setStartTime] = useState<Date | null>(null);
   const [history, setHistory] = useState<HistoryRecord[]>([]);
   
+  // Последнее показание акселерометра и время последнего шага.
+  // Хранятся в ref, а не в state: так подписка на датчик не пересоздаётся
+  // при каждом новом показании (раньше это происходило каждые 100 мс).
+  const lastAcceleration = useRef<Acceleration | null>(null);
+  const lastStepTime = useRef(0);
+
   // Средняя длина шага в метрах
   const stepLength = 0.7;
+  // Порог суммарного изменения ускорения (в g), выше которого считаем шаг
+  const stepThreshold = 1.2;
+  // Минимальный интервал между шагами (мс) — защита от двойного счёта одного шага
+  const minStepIntervalMs = 300;
 
   // Загружаем историю при монтировании
   useEffect(() => {
@@ -59,36 +68,36 @@ export default function PedometerApp() {
 
   useEffect(() => {
     let subscription: Subscription | null = null;
-    
+
     if (isMeasuring) {
-      subscription = Accelerometer.addListener(accelerometerData => {
-        const { x, y, z } = accelerometerData;
-        
-        if (lastAcceleration) {
-          const deltaX = Math.abs(x - lastAcceleration.x);
-          const deltaY = Math.abs(y - lastAcceleration.y);
-          const deltaZ = Math.abs(z - lastAcceleration.z);
-          
-          const acceleration = deltaX + deltaY + deltaZ;
-          
-          if (acceleration > 1.2) {
-            setSteps(prev => prev + 1);
-            setDistance(prev => prev + stepLength);
+      lastAcceleration.current = null;
+      Accelerometer.setUpdateInterval(100);
+
+      subscription = Accelerometer.addListener(({ x, y, z }) => {
+        const prev = lastAcceleration.current;
+
+        if (prev) {
+          const acceleration =
+            Math.abs(x - prev.x) + Math.abs(y - prev.y) + Math.abs(z - prev.z);
+          const now = Date.now();
+
+          if (acceleration > stepThreshold && now - lastStepTime.current > minStepIntervalMs) {
+            lastStepTime.current = now;
+            setSteps(s => s + 1);
+            setDistance(d => d + stepLength);
           }
         }
-        
-        setLastAcceleration({ x, y, z });
+
+        lastAcceleration.current = { x, y, z };
       });
-      
-      Accelerometer.setUpdateInterval(100);
     }
-    
+
     return () => {
       if (subscription) {
         subscription.remove();
       }
     };
-  }, [isMeasuring, lastAcceleration]);
+  }, [isMeasuring]);
 
   const startMeasuring = () => {
     setSteps(0);
