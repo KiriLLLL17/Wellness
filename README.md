@@ -59,6 +59,7 @@ Then:
 
 ## Possible improvements
 
+- Measure step-detection accuracy: record walks, count steps by hand and report precision / recall of the detector
 - Use the built-in step counter (`Pedometer` from `expo-sensors`) and compare it with the threshold method
 - Let the user set their own step length (or estimate it from height)
 - Low-pass filter on the signal instead of a fixed threshold
